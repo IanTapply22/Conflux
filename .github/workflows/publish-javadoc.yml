@@ -38,7 +38,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Generate aggregate Javadocs with Gradle
-        run: ./gradlew javadoc --no-daemon
+        run: ./gradlew aggregateJavadoc --no-daemon
 
       - name: Prepare Pages content
         shell: bash

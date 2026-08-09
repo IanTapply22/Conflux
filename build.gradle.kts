@@ -1,5 +1,8 @@
+import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.compile.JavaCompile
+import org.gradle.api.tasks.javadoc.Javadoc
 import org.gradle.api.tasks.testing.Test
+import org.gradle.jvm.toolchain.JavaToolchainService
 
 plugins {
     base
@@ -77,3 +80,30 @@ tasks.named("assemble") { dependsOn(":conflux-distribution:assemble") }
 tasks.register("test") { dependsOn(subprojects.map { it.tasks.named("test") }) }
 tasks.register("jar") { dependsOn(":conflux-distribution:shadowJar") }
 tasks.register("runServer") { dependsOn(":conflux-distribution:runServer") }
+
+tasks.register<Javadoc>("aggregateJavadoc") {
+    group = "documentation"
+    description = "Generates combined Javadocs for the Conflux API and Paper platform modules."
+
+    val documentedProjects = subprojects.filter { it.name != "conflux-distribution" }
+    val mainSourceSets =
+        documentedProjects.map {
+            it.extensions
+                .getByType<SourceSetContainer>()
+                .named("main")
+                .get()
+        }
+
+    dependsOn(documentedProjects.map { it.tasks.named("classes") })
+    source(mainSourceSets.map { it.allJava })
+    classpath = files(mainSourceSets.map { it.compileClasspath + it.output })
+    javadocTool =
+        documentedProjects.first().extensions.getByType<JavaToolchainService>().javadocToolFor {
+            languageVersion = JavaLanguageVersion.of(25)
+        }
+    destinationDir =
+        layout.buildDirectory
+            .dir("docs/javadoc")
+            .get()
+            .asFile
+}
