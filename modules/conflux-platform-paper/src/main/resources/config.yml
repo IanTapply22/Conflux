@@ -1,0 +1,6 @@
+ghosts:
+  update-rate-hz: 10
+  view-radius-blocks: 96
+  maximum-per-viewer: 30
+  stale-after-milliseconds: 1500
+  show-equipment: true

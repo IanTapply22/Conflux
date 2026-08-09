@@ -1,0 +1,21 @@
+name: Conflux
+version: '${version}'
+main: com.iantapply.conflux.paper.ConfluxPaper
+description: Cross-server player ghost synchronization powered by Relay
+api-version: '26.2'
+authors:
+  - Gucci Fox
+prefix: Conflux
+dependencies:
+  server:
+    Relay:
+      load: BEFORE
+      required: true
+      join-classpath: true
+permissions:
+  conflux.admin:
+    description: Allows use of Conflux administration commands
+    default: op
+  conflux.ghosts:
+    description: Allows players to control their cross-world ghost density
+    default: true
