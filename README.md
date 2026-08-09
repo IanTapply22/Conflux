@@ -2,7 +2,7 @@
 
 Conflux synchronizes client-only player ghosts between separate Paper servers. A player on one copy of a world can see nearby players from other copies moving around with their skin, equipment, pose, and basic animations.
 
-The remote players are packets, not Bukkit entities. They have no collision, hitbox, combat, inventory, persistence, or effect on the local world. Conflux contains no character storage, quests, parties, economy, world switching, or other MMO systems.
+The remote players are packets, not Bukkit entities. They have no collision, hitbox, combat, inventory, persistence, or effect on the local world.
 
 Relay provides the typed Redis Pub/Sub transport. Conflux does not open its own Redis connection, and Redis is the only external service required.
 
