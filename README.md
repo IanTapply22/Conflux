@@ -40,10 +40,9 @@ Relay API is published through GitHub Packages. GitHub Packages requires credent
 
 On Windows, use `.\gradlew.bat`. The plugin is written to `build/libs/Conflux-<version>.jar`.
 
-The build also checks Maven Local before GitHub Packages, which is useful while developing Relay:
+The build also checks Maven Local before GitHub Packages, which is useful while developing Conflux:
 
 ```shell
-# From the Relay repository
 ./gradlew :relay-api:publishToMavenLocal
 ```
 
@@ -92,7 +91,7 @@ git push origin v<version>
 
 ## Installation
 
-1. Install `Relay-1.0.0.jar` and `Conflux-<version>.jar` in every Paper server's `plugins` directory.
+1. Install `Relay-<version>.jar` and `Conflux-<version>.jar` in every Paper server's `plugins` directory.
 2. Start each server once.
 3. Configure Relay with a unique Paper node ID and the same Redis namespace on every server.
 4. Configure Conflux's display limits if desired.
