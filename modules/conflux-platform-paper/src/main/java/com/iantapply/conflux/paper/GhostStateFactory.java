@@ -10,9 +10,18 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemStack;
 
+/** Captures Bukkit player state in transport-safe Conflux records. */
 final class GhostStateFactory {
+    /** Prevents construction of this utility class. */
     private GhostStateFactory() {}
 
+    /**
+     * Captures the visual state currently exposed by a player.
+     *
+     * @param player player to capture
+     * @param showEquipment whether held and worn items should be serialized
+     * @return immutable transport state for the player
+     */
     static GhostState capture(Player player, boolean showEquipment) {
         var handle = ((CraftPlayer) player).getHandle();
         Property textures = handle.getGameProfile().properties().get("textures").stream()
@@ -38,6 +47,12 @@ final class GhostStateFactory {
                 showEquipment ? equipment(player.getEquipment()) : GhostEquipment.EMPTY);
     }
 
+    /**
+     * Serializes all supported equipment slots.
+     *
+     * @param equipment Bukkit equipment to serialize
+     * @return transport representation of the equipment
+     */
     private static GhostEquipment equipment(EntityEquipment equipment) {
         return new GhostEquipment(
                 encode(equipment.getItemInMainHand()),
@@ -48,6 +63,12 @@ final class GhostStateFactory {
                 encode(equipment.getHelmet()));
     }
 
+    /**
+     * Encodes an item stack for transport.
+     *
+     * @param item stack to encode, possibly {@code null}
+     * @return Base64 item data, or an empty string for an empty slot
+     */
     private static String encode(ItemStack item) {
         if (item == null || item.getType() == Material.AIR) return "";
         return Base64.getEncoder().encodeToString(item.serializeAsBytes());

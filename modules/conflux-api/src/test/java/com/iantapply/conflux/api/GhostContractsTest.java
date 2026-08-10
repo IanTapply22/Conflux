@@ -7,13 +7,16 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
+/** Verifies validation and immutability guarantees of the public ghost contracts. */
 class GhostContractsTest {
+    /** Verifies that frame player collections cannot be mutated after construction. */
     @Test
     void frameDefensivelyCopiesPlayers() {
         GhostFrame frame = new GhostFrame("world-1", 1, 2, List.of(state()));
         assertThrows(UnsupportedOperationException.class, () -> frame.players().clear());
     }
 
+    /** Verifies that non-finite world coordinates are rejected. */
     @Test
     void stateRejectsNonFiniteCoordinates() {
         GhostState valid = state();
@@ -38,11 +41,17 @@ class GhostContractsTest {
                         GhostEquipment.EMPTY));
     }
 
+    /** Verifies that the shared empty equipment snapshot is safe to inspect. */
     @Test
     void emptyEquipmentIsSafe() {
         assertTrue(GhostEquipment.EMPTY.mainHand().isEmpty());
     }
 
+    /**
+     * Creates a valid state used by contract tests.
+     *
+     * @return valid player ghost state
+     */
     private static GhostState state() {
         return new GhostState(
                 UUID.randomUUID(),

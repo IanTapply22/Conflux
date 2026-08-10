@@ -3,7 +3,26 @@ package com.iantapply.conflux.api;
 import java.util.Objects;
 import java.util.UUID;
 
-/** One remote player's visual state at a point in time. */
+/**
+ * One remote player's visual state at a point in time.
+ *
+ * @param playerId unique identifier of the remote player
+ * @param username current Minecraft username of the remote player
+ * @param world name of the world containing the remote player
+ * @param x world x-coordinate
+ * @param y world y-coordinate
+ * @param z world z-coordinate
+ * @param yaw horizontal rotation in degrees
+ * @param pitch vertical rotation in degrees
+ * @param onGround whether the player is touching the ground
+ * @param sneaking whether the player is sneaking
+ * @param sprinting whether the player is sprinting
+ * @param swimming whether the player is swimming
+ * @param gliding whether the player is gliding with an elytra
+ * @param skinValue signed profile texture value, or an empty string
+ * @param skinSignature profile texture signature, or an empty string
+ * @param equipment equipment worn or held by the player
+ */
 public record GhostState(
         UUID playerId,
         String username,
@@ -21,6 +40,7 @@ public record GhostState(
         String skinValue,
         String skinSignature,
         GhostEquipment equipment) {
+    /** Validates and creates a player ghost state. */
     public GhostState {
         Objects.requireNonNull(playerId, "playerId");
         Objects.requireNonNull(username, "username");

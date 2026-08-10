@@ -38,7 +38,7 @@ import org.bukkit.craftbukkit.inventory.CraftItemStack;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
-/** A client-only player entity. It is never inserted into the local world's entity list. */
+/** A client-only player entity that is never inserted into the local world's entity list. */
 final class PacketGhost {
     private static final int INTERPOLATION_TICKS = 2;
 
@@ -60,6 +60,13 @@ final class PacketGhost {
     private int interpolationTick = INTERPOLATION_TICKS;
     private boolean active = true;
 
+    /**
+     * Creates and immediately spawns a packet-backed ghost for one viewer.
+     *
+     * @param plugin plugin used to schedule delayed packets
+     * @param viewer local player receiving the ghost packets
+     * @param state initial remote player state
+     */
     PacketGhost(Plugin plugin, Player viewer, GhostState state) {
         this.plugin = plugin;
         this.viewer = viewer;
@@ -84,12 +91,24 @@ final class PacketGhost {
         spawn();
     }
 
+    /**
+     * Tests whether a state can continue using this ghost's immutable profile identity.
+     *
+     * @param state candidate state
+     * @return whether the username and skin properties match
+     */
     boolean sameIdentity(GhostState state) {
         return identity.username().equals(state.username())
                 && identity.skinValue().equals(state.skinValue())
                 && identity.skinSignature().equals(state.skinSignature());
     }
 
+    /**
+     * Applies a newer target state and begins position interpolation.
+     *
+     * @param state newest visual state
+     * @param sequence sequence of the frame containing the state
+     */
     void target(GhostState state, long sequence) {
         identity = state;
         if (sequence != targetSequence) {
@@ -109,6 +128,7 @@ final class PacketGhost {
         }
     }
 
+    /** Advances position interpolation by one server tick and sends movement packets. */
     void tick() {
         if (interpolationTick >= INTERPOLATION_TICKS) return;
         interpolationTick++;
@@ -122,6 +142,11 @@ final class PacketGhost {
         send(new ClientboundRotateHeadPacket(entity, angle(identity.yaw())));
     }
 
+    /**
+     * Sends a transient animation packet for this ghost.
+     *
+     * @param animation animation to play
+     */
     void animate(GhostAnimationType animation) {
         switch (animation) {
             case SWING_MAIN_HAND ->
@@ -131,6 +156,7 @@ final class PacketGhost {
         }
     }
 
+    /** Removes the ghost entity and its temporary player-info entry from the viewer. */
     void destroy() {
         if (!active) return;
         active = false;
@@ -138,6 +164,7 @@ final class PacketGhost {
         send(new ClientboundPlayerInfoRemovePacket(List.of(entity.getUUID())));
     }
 
+    /** Sends the packets that initially introduce this ghost to the viewer. */
     private void spawn() {
         ClientboundPlayerInfoUpdatePacket.Entry entry = new ClientboundPlayerInfoUpdatePacket.Entry(
                 entity.getUUID(), entity.getGameProfile(), true, 0, GameType.SURVIVAL, null, true, 0, null);
@@ -172,6 +199,12 @@ final class PacketGhost {
                         20L);
     }
 
+    /**
+     * Copies pose, rotation, and movement flags into the backing server-player object.
+     *
+     * @param state visual state to apply
+     * @param initial whether this is the initial state before spawning
+     */
     private void applyState(GhostState state, boolean initial) {
         entity.setPos(state.x(), state.y(), state.z());
         entity.setYRot(state.yaw());
@@ -188,6 +221,7 @@ final class PacketGhost {
         }
     }
 
+    /** Sends all held and worn equipment slots to the viewer. */
     private void sendEquipment() {
         List<Pair<EquipmentSlot, ItemStack>> slots = List.of(
                 Pair.of(EquipmentSlot.MAINHAND, decode(equipment.mainHand())),
@@ -199,10 +233,21 @@ final class PacketGhost {
         send(new ClientboundSetEquipmentPacket(entity.getId(), slots));
     }
 
+    /**
+     * Sends one packet when the viewer remains connected.
+     *
+     * @param packet packet to send
+     */
     private void send(Packet<?> packet) {
         if (viewer.isConnected()) ((CraftPlayer) viewer).getHandle().connection.send(packet);
     }
 
+    /**
+     * Decodes transported Bukkit item data into an NMS item stack.
+     *
+     * @param encoded Base64-encoded Bukkit item data
+     * @return decoded stack, or an empty stack when the value is absent or invalid
+     */
     private static ItemStack decode(String encoded) {
         if (encoded.isEmpty()) return ItemStack.EMPTY;
         try {
@@ -215,6 +260,12 @@ final class PacketGhost {
         }
     }
 
+    /**
+     * Selects the client pose represented by a ghost state.
+     *
+     * @param state remote player state
+     * @return matching entity pose
+     */
     private static Pose pose(GhostState state) {
         if (state.gliding()) return Pose.FALL_FLYING;
         if (state.swimming()) return Pose.SWIMMING;
@@ -222,10 +273,24 @@ final class PacketGhost {
         return Pose.STANDING;
     }
 
+    /**
+     * Converts rotation degrees to the packed angle used by entity packets.
+     *
+     * @param degrees rotation in degrees
+     * @return packed protocol angle
+     */
     private static byte angle(float degrees) {
         return (byte) Math.floor(degrees * 256.0F / 360.0F);
     }
 
+    /**
+     * Linearly interpolates between two values.
+     *
+     * @param start starting value
+     * @param end target value
+     * @param progress interpolation fraction
+     * @return interpolated value
+     */
     private static double lerp(double start, double end, double progress) {
         return start + (end - start) * progress;
     }

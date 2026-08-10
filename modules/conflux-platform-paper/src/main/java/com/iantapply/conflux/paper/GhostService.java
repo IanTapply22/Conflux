@@ -27,6 +27,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
+/** Coordinates state publication, remote frame selection, and client-side ghost rendering. */
 final class GhostService implements Listener, AutoCloseable {
     private static final int MAX_PLAYERS_PER_REMOTE_FRAME = 250;
 
@@ -44,6 +45,13 @@ final class GhostService implements Listener, AutoCloseable {
     private final BukkitTask publishTask;
     private final BukkitTask renderTask;
 
+    /**
+     * Starts the publication and rendering loops and subscribes to Relay topics.
+     *
+     * @param plugin owning Paper plugin
+     * @param relay Relay messaging service
+     * @param config validated ghost settings
+     */
     GhostService(JavaPlugin plugin, MessagingService relay, GhostConfig config) {
         this.plugin = plugin;
         this.relay = relay;
@@ -55,28 +63,60 @@ final class GhostService implements Listener, AutoCloseable {
         renderTask = Bukkit.getScheduler().runTaskTimer(plugin, this::renderTick, 1L, 1L);
     }
 
+    /**
+     * Returns the local Relay node identifier.
+     *
+     * @return local node identifier
+     */
     String nodeId() {
         return nodeId;
     }
 
+    /**
+     * Counts players present in the latest accepted remote frames.
+     *
+     * @return number of known remote players
+     */
     int remotePlayers() {
         return remoteFrames.values().stream()
                 .mapToInt(frame -> frame.players().size())
                 .sum();
     }
 
+    /**
+     * Counts client-side ghost entities currently rendered to all viewers.
+     *
+     * @return total number of rendered ghosts
+     */
     int renderedGhosts() {
         return rendered.values().stream().mapToInt(Map::size).sum();
     }
 
+    /**
+     * Gets a player's configured ghost display limit.
+     *
+     * @param player local viewer
+     * @return viewer-specific limit, or the configured default
+     */
     int viewerLimit(Player player) {
         return viewerLimits.getOrDefault(player.getUniqueId(), config.maximumPerViewer());
     }
 
+    /**
+     * Sets and clamps a player's ghost display limit.
+     *
+     * @param player local viewer
+     * @param limit requested limit
+     */
     void setViewerLimit(Player player, int limit) {
         viewerLimits.put(player.getUniqueId(), Math.clamp(limit, 0, config.maximumPerViewer()));
     }
 
+    /**
+     * Publishes main-hand and off-hand swing animations.
+     *
+     * @param event monitored Paper animation event
+     */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onAnimation(PlayerAnimationEvent event) {
         GhostAnimationType type = event.getAnimationType() == PlayerAnimationType.OFF_ARM_SWING
@@ -85,17 +125,28 @@ final class GhostService implements Listener, AutoCloseable {
         publishAnimation(event.getPlayer(), type);
     }
 
+    /**
+     * Publishes the hurt animation when a local player takes damage.
+     *
+     * @param event monitored damage event
+     */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(EntityDamageEvent event) {
         if (event.getEntity() instanceof Player player) publishAnimation(player, GhostAnimationType.HURT);
     }
 
+    /**
+     * Removes per-viewer state when a local player disconnects.
+     *
+     * @param event player disconnect event
+     */
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         viewerLimits.remove(event.getPlayer().getUniqueId());
         destroyViewer(event.getPlayer().getUniqueId());
     }
 
+    /** Cancels tasks, closes subscriptions, and destroys all rendered ghosts. */
     @Override
     public void close() {
         publishTask.cancel();
@@ -110,6 +161,7 @@ final class GhostService implements Listener, AutoCloseable {
         remoteFrames.clear();
     }
 
+    /** Captures and publishes a complete frame for the local node. */
     private void publishFrame() {
         List<GhostState> players = Bukkit.getOnlinePlayers().stream()
                 .map(player -> GhostStateFactory.capture(player, config.showEquipment()))
@@ -120,6 +172,12 @@ final class GhostService implements Listener, AutoCloseable {
                 new GhostFrame(nodeId, frameSequence.incrementAndGet(), System.currentTimeMillis(), players));
     }
 
+    /**
+     * Publishes a transient animation for a local player.
+     *
+     * @param player player that produced the animation
+     * @param type animation to publish
+     */
     private void publishAnimation(Player player, GhostAnimationType type) {
         relay.publish(
                 RelayTopics.ANIMATION,
@@ -132,6 +190,11 @@ final class GhostService implements Listener, AutoCloseable {
                         System.currentTimeMillis()));
     }
 
+    /**
+     * Accepts a newer bounded frame from a remote node on the server thread.
+     *
+     * @param frame received node frame
+     */
     private void receive(GhostFrame frame) {
         if (frame.nodeId().equals(nodeId) || frame.players().size() > MAX_PLAYERS_PER_REMOTE_FRAME) return;
         Bukkit.getScheduler().runTask(plugin, () -> {
@@ -143,6 +206,11 @@ final class GhostService implements Listener, AutoCloseable {
         });
     }
 
+    /**
+     * Dispatches a remote animation to each viewer rendering the corresponding ghost.
+     *
+     * @param animation received animation
+     */
     private void receive(GhostAnimation animation) {
         if (animation.nodeId().equals(nodeId)) return;
         Bukkit.getScheduler().runTask(plugin, () -> rendered.values().forEach(ghosts -> {
@@ -151,6 +219,7 @@ final class GhostService implements Listener, AutoCloseable {
         }));
     }
 
+    /** Expires stale nodes and reconciles the ghosts visible to every online viewer. */
     private void renderTick() {
         long now = System.currentTimeMillis();
         remoteFrames
@@ -160,6 +229,11 @@ final class GhostService implements Listener, AutoCloseable {
         rendered.keySet().removeIf(viewerId -> Bukkit.getPlayer(viewerId) == null);
     }
 
+    /**
+     * Selects the nearest eligible remote players and updates one viewer's packet ghosts.
+     *
+     * @param viewer local player receiving ghost packets
+     */
     private void reconcile(Player viewer) {
         int limit = viewerLimit(viewer);
         double radiusSquared = config.viewRadiusBlocks() * config.viewRadiusBlocks();
@@ -215,11 +289,23 @@ final class GhostService implements Listener, AutoCloseable {
         });
     }
 
+    /**
+     * Destroys every packet ghost belonging to a viewer.
+     *
+     * @param viewerId unique identifier of the viewer
+     */
     private void destroyViewer(UUID viewerId) {
         Map<GhostKey, PacketGhost> ghosts = rendered.remove(viewerId);
         if (ghosts != null) ghosts.values().forEach(PacketGhost::destroy);
     }
 
+    /**
+     * Calculates squared three-dimensional distance without allocating a location.
+     *
+     * @param viewer local viewer
+     * @param state remote player state
+     * @return squared distance between the viewer and remote state
+     */
     private static double distanceSquared(Player viewer, GhostState state) {
         double dx = viewer.getX() - state.x();
         double dy = viewer.getY() - state.y();
@@ -227,7 +313,23 @@ final class GhostService implements Listener, AutoCloseable {
         return dx * dx + dy * dy + dz * dz;
     }
 
+    /**
+     * Latest accepted snapshot from a remote node.
+     *
+     * @param sequence source frame sequence
+     * @param receivedAt local receipt time in Unix epoch milliseconds
+     * @param players remote player states in the frame
+     */
     private record NodeFrame(long sequence, long receivedAt, List<GhostState> players) {}
 
+    /**
+     * Eligible remote player considered during per-viewer selection.
+     *
+     * @param key node-qualified player key
+     * @param sequence source frame sequence
+     * @param receivedAt local frame receipt time
+     * @param distanceSquared squared distance from the viewer
+     * @param state remote visual state
+     */
     private record Candidate(GhostKey key, long sequence, long receivedAt, double distanceSquared, GhostState state) {}
 }

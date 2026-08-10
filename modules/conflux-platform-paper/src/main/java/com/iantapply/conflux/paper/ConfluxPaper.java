@@ -14,6 +14,10 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class ConfluxPaper extends JavaPlugin {
     private GhostService ghosts;
 
+    /** Creates the Paper plugin entry point. */
+    public ConfluxPaper() {}
+
+    /** Starts ghost synchronization and registers the plugin commands. */
     @Override
     public void onEnable() {
         saveDefaultConfig();
@@ -32,11 +36,17 @@ public final class ConfluxPaper extends JavaPlugin {
         }
     }
 
+    /** Stops synchronization and removes every rendered ghost. */
     @Override
     public void onDisable() {
         if (ghosts != null) ghosts.close();
     }
 
+    /**
+     * Registers the status and per-player ghost-limit commands.
+     *
+     * @param config validated plugin configuration
+     */
     private void registerCommands(GhostConfig config) {
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
             event.registrar()
@@ -78,6 +88,12 @@ public final class ConfluxPaper extends JavaPlugin {
         });
     }
 
+    /**
+     * Shows a command sender's current ghost display limit.
+     *
+     * @param sender command sender requesting the limit
+     * @return the Brigadier command result
+     */
     private int showGhostLimit(org.bukkit.command.CommandSender sender) {
         if (!(sender instanceof Player player)) {
             sender.sendRichMessage("<red>Only players have a ghost display limit.</red>");
@@ -88,6 +104,13 @@ public final class ConfluxPaper extends JavaPlugin {
         return Command.SINGLE_SUCCESS;
     }
 
+    /**
+     * Changes a player's ghost display limit.
+     *
+     * @param sender command sender changing the limit
+     * @param limit requested maximum number of rendered ghosts
+     * @return the Brigadier command result
+     */
     private int setGhostLimit(org.bukkit.command.CommandSender sender, int limit) {
         if (!(sender instanceof Player player)) {
             sender.sendRichMessage("<red>Only players have a ghost display limit.</red>");

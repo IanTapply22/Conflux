@@ -2,12 +2,28 @@ package com.iantapply.conflux.paper;
 
 import org.bukkit.configuration.file.FileConfiguration;
 
+/**
+ * Validated settings controlling ghost publication, selection, and rendering.
+ *
+ * @param updateRateHz number of state snapshots published per second
+ * @param viewRadiusBlocks maximum distance at which a ghost can be selected
+ * @param maximumPerViewer maximum ghosts rendered to one viewer
+ * @param staleAfterMilliseconds time without a frame before a remote node is discarded
+ * @param showEquipment whether equipment is included in published states
+ */
 record GhostConfig(
         int updateRateHz,
         double viewRadiusBlocks,
         int maximumPerViewer,
         long staleAfterMilliseconds,
         boolean showEquipment) {
+    /**
+     * Loads and validates ghost settings from a Bukkit configuration.
+     *
+     * @param source source configuration
+     * @return validated ghost settings
+     * @throws IllegalArgumentException when a setting is outside its supported range
+     */
     static GhostConfig load(FileConfiguration source) {
         GhostConfig config = new GhostConfig(
                 source.getInt("ghosts.update-rate-hz", 10),
@@ -30,6 +46,11 @@ record GhostConfig(
         return config;
     }
 
+    /**
+     * Converts the configured publication frequency to scheduler ticks.
+     *
+     * @return ticks between published frames
+     */
     long publishPeriodTicks() {
         return Math.max(1, Math.round(20.0 / updateRateHz));
     }
