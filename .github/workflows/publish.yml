@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: write
-  packages: read
+  packages: write
   id-token: write
   attestations: write
 
@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   release:
-    name: Verify and release plugin
+    name: Verify, publish packages and release plugin
     runs-on: ubuntu-latest
     timeout-minutes: 40
     environment: jdk25-publishing
@@ -46,11 +46,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Verify, build and create SBOM
-        run: ./gradlew clean check javadoc jar cyclonedxBom --no-daemon --no-configuration-cache
+      - name: Verify, build, create SBOM and publish packages
+        run: ./gradlew clean check javadoc jar cyclonedxBom publish --no-daemon --no-configuration-cache
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
 
       - name: Create SHA-256 checksum
         shell: bash

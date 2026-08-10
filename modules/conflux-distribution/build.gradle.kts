@@ -1,5 +1,6 @@
 plugins {
     `java-library`
+    `maven-publish`
     id("com.gradleup.shadow") version "9.6.1"
     id("xyz.jpenilla.run-paper")
 }
@@ -16,6 +17,20 @@ tasks.shadowJar {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     exclude("META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA", "module-info.class")
     manifest { attributes("paperweight-mappings-namespace" to "mojang") }
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("plugin") {
+            artifact(tasks.shadowJar)
+            artifactId = "conflux"
+            pom {
+                name = "Conflux"
+                description = project.description.toString()
+                url = "https://github.com/IanTapply22/Conflux"
+            }
+        }
+    }
 }
 
 tasks.runServer {

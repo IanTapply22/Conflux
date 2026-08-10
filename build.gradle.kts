@@ -1,6 +1,9 @@
+import org.gradle.api.publish.PublishingExtension
+import org.gradle.api.publish.maven.MavenPublication
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.api.tasks.testing.Test
+import org.gradle.plugins.signing.SigningExtension
 
 plugins {
     base
@@ -51,6 +54,46 @@ subprojects {
         options.compilerArgs.addAll(listOf("-Xlint:all", "-Xlint:-processing"))
     }
     tasks.withType<Test>().configureEach { useJUnitPlatform() }
+
+    pluginManager.withPlugin("maven-publish") {
+        apply(plugin = "signing")
+        extensions.configure<PublishingExtension> {
+            publications.withType<MavenPublication>().configureEach {
+                pom {
+                    scm {
+                        connection = "scm:git:https://github.com/IanTapply22/Conflux.git"
+                        developerConnection = "scm:git:ssh://git@github.com/IanTapply22/Conflux.git"
+                        url = "https://github.com/IanTapply22/Conflux"
+                    }
+                }
+            }
+            repositories {
+                maven {
+                    name = "GitHubPackages"
+                    val repository =
+                        providers
+                            .environmentVariable("GITHUB_REPOSITORY")
+                            .orElse("IanTapply22/Conflux")
+                            .get()
+                            .lowercase()
+                    url = uri("https://maven.pkg.github.com/$repository")
+                    credentials {
+                        username = providers.environmentVariable("GITHUB_ACTOR").orNull
+                        password = providers.environmentVariable("GITHUB_TOKEN").orNull
+                    }
+                }
+            }
+        }
+        extensions.configure<SigningExtension> {
+            val signingKey = providers.environmentVariable("SIGNING_KEY")
+            val signingPassword = providers.environmentVariable("SIGNING_PASSWORD")
+            setRequired(signingKey.isPresent)
+            if (signingKey.isPresent) {
+                useInMemoryPgpKeys(signingKey.get(), signingPassword.orNull)
+            }
+            sign(project.extensions.getByType<PublishingExtension>().publications)
+        }
+    }
 }
 
 spotless {
@@ -84,6 +127,16 @@ tasks.named("assemble") { dependsOn(":conflux-distribution:assemble") }
 tasks.register("test") { dependsOn(subprojects.map { it.tasks.named("test") }) }
 tasks.register("jar") { dependsOn(":conflux-distribution:shadowJar") }
 tasks.register("runServer") { dependsOn(":conflux-distribution:runServer") }
+tasks.register("publish") {
+    group = "publishing"
+    description = "Publishes the Conflux API and distribution to GitHub Packages."
+    dependsOn(":conflux-api:publish", ":conflux-distribution:publish")
+}
+tasks.register("publishToMavenLocal") {
+    group = "publishing"
+    description = "Publishes the Conflux API and distribution to the local Maven repository."
+    dependsOn(":conflux-api:publishToMavenLocal", ":conflux-distribution:publishToMavenLocal")
+}
 
 val documentedProjects = subprojects.filter { it.name != "conflux-distribution" }
 

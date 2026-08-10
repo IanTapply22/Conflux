@@ -79,7 +79,7 @@ Do not shade `relay-api` into Conflux. Relay supplies the API classes at runtime
 
 ## Releases and publications
 
-Pushing a semantic version tag such as `v1.2.3` runs the release workflow. It verifies the project, builds the Conflux plugin, creates a SHA-256 checksum and CycloneDX SBOM, and then creates a GitHub Release containing those files. The release JAR also receives a GitHub build-provenance attestation.
+Pushing a semantic version tag such as `v1.2.3` runs the release workflow. It verifies the project, publishes `conflux-api` and the combined `conflux` artifact to GitHub Packages, then creates a GitHub Release containing the plugin JAR, SHA-256 checksum, and CycloneDX SBOM. Maven publications are PGP-signed when the `SIGNING_KEY` and `SIGNING_PASSWORD` secrets are configured; the release JAR also receives a GitHub build-provenance attestation.
 
 Module-specific Javadocs are collected under a single index and deployed to GitHub Pages from the `main` branch.
 
