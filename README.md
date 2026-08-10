@@ -77,6 +77,19 @@ The equivalent Maven declaration is:
 
 Do not shade `relay-api` into Conflux. Relay supplies the API classes at runtime, and Conflux declares Relay as a required Paper dependency with classpath joining enabled.
 
+## Releases and publications
+
+Pushing a semantic version tag such as `v1.2.3` runs the release workflow. It verifies the project, builds the Conflux plugin, creates a SHA-256 checksum and CycloneDX SBOM, and then creates a GitHub Release containing those files. The release JAR also receives a GitHub build-provenance attestation.
+
+Module-specific Javadocs are collected under a single index and deployed to GitHub Pages from the `main` branch.
+
+To trigger the release workflow, run:
+
+```shell
+git tag -a v<version> -m "Conflux <version>"
+git push origin v<version>
+```
+
 ## Installation
 
 1. Install `Relay-1.0.0.jar` and `Conflux-<version>.jar` in every Paper server's `plugins` directory.

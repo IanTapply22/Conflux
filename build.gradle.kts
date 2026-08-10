@@ -1,8 +1,6 @@
-import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.compile.JavaCompile
-import org.gradle.api.tasks.javadoc.Javadoc
 import org.gradle.api.tasks.testing.Test
-import org.gradle.jvm.toolchain.JavaToolchainService
 
 plugins {
     base
@@ -81,31 +79,17 @@ tasks.register("test") { dependsOn(subprojects.map { it.tasks.named("test") }) }
 tasks.register("jar") { dependsOn(":conflux-distribution:shadowJar") }
 tasks.register("runServer") { dependsOn(":conflux-distribution:runServer") }
 
-tasks.register<Javadoc>("aggregateJavadoc") {
+val documentedProjects = subprojects.filter { it.name != "conflux-distribution" }
+
+tasks.register<Sync>("javadoc") {
     group = "documentation"
-    description = "Generates combined Javadocs for the Conflux API and Paper platform modules."
-
-    val documentedProjects = subprojects.filter { it.name != "conflux-distribution" }
-    val mainSourceSets =
-        documentedProjects.map {
-            it.extensions
-                .getByType<SourceSetContainer>()
-                .named("main")
-                .get()
-        }
-
-    dependsOn(documentedProjects.map { it.tasks.named("classes") })
-    source(mainSourceSets.map { it.allJava })
-    classpath = files(mainSourceSets.map { it.compileClasspath + it.output })
-    javadocTool =
-        documentedProjects.first().extensions.getByType<JavaToolchainService>().javadocToolFor {
-            languageVersion = JavaLanguageVersion.of(25)
-        }
-    destinationDir =
-        layout.buildDirectory
-            .dir("docs/javadoc")
-            .get()
-            .asFile
+    description = "Aggregates Javadocs from every documented Conflux module."
+    dependsOn(documentedProjects.map { it.tasks.named("javadoc") })
+    into(layout.buildDirectory.dir("docs/javadoc"))
+    from("docs/javadoc-index.html") { rename { "index.html" } }
+    documentedProjects.forEach { module ->
+        from(module.layout.buildDirectory.dir("docs/javadoc")) { into(module.name) }
+    }
 }
 
 tasks.register<Exec>("installGitHooks") {
