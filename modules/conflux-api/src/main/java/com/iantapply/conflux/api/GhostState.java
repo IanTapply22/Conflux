@@ -48,13 +48,64 @@ public record GhostState(
         skinValue = skinValue == null ? "" : skinValue;
         skinSignature = skinSignature == null ? "" : skinSignature;
         Objects.requireNonNull(equipment, "equipment");
-        if (username.isBlank() || username.length() > 16) throw new IllegalArgumentException("invalid username");
-        if (world.isBlank()) throw new IllegalArgumentException("world must not be blank");
+        if (!username.matches("[A-Za-z0-9_]{1,16}")) throw new IllegalArgumentException("invalid username");
+        if (world.isBlank() || world.length() > 128 || world.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("invalid world");
+        }
         if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
             throw new IllegalArgumentException("coordinates must be finite");
         }
         if (!Float.isFinite(yaw) || !Float.isFinite(pitch)) {
             throw new IllegalArgumentException("rotation must be finite");
         }
+    }
+
+    /**
+     * Returns the frequently changing portion of this full snapshot.
+     *
+     * @return movement portion
+     */
+    public GhostMovement movement() {
+        return new GhostMovement(
+                playerId, world, x, y, z, yaw, pitch, onGround, sneaking, sprinting, swimming, gliding);
+    }
+
+    /**
+     * Returns the infrequently changing portion of this full snapshot.
+     *
+     * @return appearance portion
+     */
+    public GhostAppearance appearance() {
+        return new GhostAppearance(playerId, username, skinValue, skinSignature, equipment);
+    }
+
+    /**
+     * Combines movement and appearance state into a renderable full snapshot.
+     *
+     * @param movement movement portion
+     * @param appearance appearance portion for the same player
+     * @return combined renderable snapshot
+     */
+    public static GhostState combine(GhostMovement movement, GhostAppearance appearance) {
+        if (!movement.playerId().equals(appearance.playerId())) {
+            throw new IllegalArgumentException("movement and appearance playerId differ");
+        }
+        return new GhostState(
+                movement.playerId(),
+                appearance.username(),
+                movement.world(),
+                movement.x(),
+                movement.y(),
+                movement.z(),
+                movement.yaw(),
+                movement.pitch(),
+                movement.onGround(),
+                movement.sneaking(),
+                movement.sprinting(),
+                movement.swimming(),
+                movement.gliding(),
+                appearance.skinValue(),
+                appearance.skinSignature(),
+                appearance.equipment());
     }
 }

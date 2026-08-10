@@ -15,6 +15,9 @@ Relay provides the typed Redis Pub/Sub transport. Conflux does not open its own 
 - sneaking, sprinting, swimming, and gliding state;
 - main-hand swing, off-hand swing, and hurt animations;
 - configurable distance filtering and per-viewer limits;
+- lightweight movement frames with change-only appearance updates;
+- process-session ordering that survives node restarts;
+- realm isolation, bounded receive queues, and spatial selection indexing;
 - `/ghosts off|low|medium|high` density controls; and
 - automatic removal after a remote node stops publishing.
 
@@ -105,14 +108,21 @@ Paper creates `plugins/Conflux/config.yml`:
 
 ```yaml
 ghosts:
+  realm-id: default
   update-rate-hz: 10
+  full-snapshot-interval-seconds: 5
+  selection-period-ticks: 2
   view-radius-blocks: 96
   maximum-per-viewer: 30
+  maximum-remote-nodes: 128
   stale-after-milliseconds: 1500
+  maximum-animation-age-milliseconds: 2000
   show-equipment: true
+  teleport-threshold-blocks: 16
+  tab-list-removal-delay-ticks: 20
 ```
 
-`update-rate-hz` accepts 1–20. Higher rates are smoother but increase Redis and client packet traffic. `maximum-per-viewer` accepts 0–200, and the radius accepts 1–512 blocks.
+`realm-id` isolates logical networks sharing a Relay namespace; only nodes with the same realm see one another. `update-rate-hz` accepts 1–20. Higher rates are smoother but increase Redis and client packet traffic. `maximum-per-viewer` accepts 0–200, and the radius accepts 1–512 blocks. Full snapshots repair missed change-only appearance messages, while `selection-period-ticks` controls how frequently nearby-player membership is recalculated.
 
 Players can choose:
 
@@ -130,15 +140,21 @@ These preferences last until the player disconnects. `high` uses the configured 
 ```text
 Paper A                         Redis / Relay                         Paper B
 
-real players -- 10 Hz frame --> conflux.ghost.frame.v1 --> remote snapshot cache
-animations ---- event packet -> conflux.ghost.animation.v1 -> packet-only players
+real players -- movement -----> conflux.ghost.movement.v2 ---\
+appearance --- when changed --> conflux.ghost.appearance.v2 ---+-> remote state store
+recovery ----- full snapshot -> conflux.ghost.frame.v2 --------/
+animations ---- event packet -> conflux.ghost.animation.v2 ------> packet-only players
                                                                     |
                                                            nearby local viewers
 ```
 
-Each Paper node publishes a complete transient snapshot of its online players through `Destination.paperServers()`. Receiving nodes replace the previous snapshot from that node, discard stale nodes, select the nearest players in the same named world, and create client-only player entities for each local viewer.
+Each Paper process generates a random session ID. Sequence ordering applies within that session, so a restarted node can begin again without waiting for its old sequence to expire. Messages also carry an explicit protocol version and configured realm ID.
+
+Each node publishes lightweight movement snapshots through `Destination.paperServers()`. Skin and equipment data is cached and sent when it changes, with a periodic complete snapshot for recovery. Receiving nodes merge the streams, discard stale or replayed data, index players by world and spatial cell, and create client-only player entities for nearby local viewers.
 
 Frames are deliberately transient. A missed frame is replaced by the next one, so no durable queue or database is needed. Empty shutdown frames remove ghosts immediately; local staleness removal handles crashes and network partitions.
+
+Protocol v2 uses new Relay topic names. Upgrade all participating Conflux servers together when moving from a v1 release; mixed v1/v2 nodes intentionally do not exchange ghost state.
 
 The packet renderer targets Paper 26.2's Mojang-mapped internals. Minecraft protocol changes can require corresponding Conflux updates.
 

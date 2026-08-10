@@ -1,6 +1,13 @@
 ghosts:
+  realm-id: default
   update-rate-hz: 10
+  full-snapshot-interval-seconds: 5
+  selection-period-ticks: 2
   view-radius-blocks: 96
   maximum-per-viewer: 30
+  maximum-remote-nodes: 128
   stale-after-milliseconds: 1500
+  maximum-animation-age-milliseconds: 2000
   show-equipment: true
+  teleport-threshold-blocks: 16
+  tab-list-removal-delay-ticks: 20

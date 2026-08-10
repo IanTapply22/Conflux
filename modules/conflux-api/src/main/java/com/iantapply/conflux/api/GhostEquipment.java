@@ -24,5 +24,23 @@ public record GhostEquipment(String mainHand, String offHand, String feet, Strin
         Objects.requireNonNull(legs, "legs");
         Objects.requireNonNull(chest, "chest");
         Objects.requireNonNull(head, "head");
+        validateLength(mainHand, "mainHand");
+        validateLength(offHand, "offHand");
+        validateLength(feet, "feet");
+        validateLength(legs, "legs");
+        validateLength(chest, "chest");
+        validateLength(head, "head");
+    }
+
+    /**
+     * Enforces the per-slot encoded transport bound.
+     *
+     * @param value encoded equipment value
+     * @param name slot name used in validation errors
+     */
+    private static void validateLength(String value, String name) {
+        if (value.length() > GhostProtocol.MAX_EQUIPMENT_LENGTH) {
+            throw new IllegalArgumentException(name + " is too long");
+        }
     }
 }

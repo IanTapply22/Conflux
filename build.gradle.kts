@@ -99,7 +99,7 @@ subprojects {
 spotless {
     isEnforceCheck = false
     java {
-        target("modules/**/src/**/*.java")
+        target(subprojects.map { module -> module.fileTree("src") { include("**/*.java") } })
         palantirJavaFormat()
         formatAnnotations()
         removeUnusedImports()
@@ -107,14 +107,22 @@ spotless {
         endWithNewline()
     }
     kotlinGradle {
-        target("*.gradle.kts", "modules/**/*.gradle.kts")
+        target(files(file("build.gradle.kts"), subprojects.map { it.file("build.gradle.kts") }))
         ktlint()
         trimTrailingWhitespace()
         endWithNewline()
     }
     format("projectFiles") {
-        target("*.md", "*.properties", ".gitattributes", ".gitignore", "modules/**/*.yml", "modules/**/*.json")
-        targetExclude("**/build/**")
+        target(
+            files(
+                fileTree(projectDir) {
+                    include("*.md", "*.properties", ".gitattributes", ".gitignore")
+                },
+                subprojects.map { module ->
+                    module.fileTree("src/main/resources") { include("**/*.yml", "**/*.json") }
+                },
+            ),
+        )
         trimTrailingWhitespace()
         endWithNewline()
     }

@@ -12,7 +12,8 @@ class GhostContractsTest {
     /** Verifies that frame player collections cannot be mutated after construction. */
     @Test
     void frameDefensivelyCopiesPlayers() {
-        GhostFrame frame = new GhostFrame("world-1", 1, 2, List.of(state()));
+        GhostFrame frame = new GhostFrame(
+                GhostProtocol.CURRENT_VERSION, "default", "world-1", UUID.randomUUID(), 1, 2, List.of(state()));
         assertThrows(UnsupportedOperationException.class, () -> frame.players().clear());
     }
 
@@ -45,6 +46,37 @@ class GhostContractsTest {
     @Test
     void emptyEquipmentIsSafe() {
         assertTrue(GhostEquipment.EMPTY.mainHand().isEmpty());
+    }
+
+    /** Verifies that duplicate players cannot make a full frame ambiguous. */
+    @Test
+    void frameRejectsDuplicatePlayers() {
+        GhostState state = state();
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new GhostFrame(
+                        GhostProtocol.CURRENT_VERSION,
+                        "default",
+                        "node-1",
+                        UUID.randomUUID(),
+                        1,
+                        2,
+                        List.of(state, state)));
+    }
+
+    /** Verifies that protocol payload strings have defensive upper bounds. */
+    @Test
+    void equipmentRejectsOversizedValues() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new GhostEquipment("x".repeat(GhostProtocol.MAX_EQUIPMENT_LENGTH + 1), "", "", "", "", ""));
+    }
+
+    /** Verifies that movement and appearance snapshots can reconstruct full state. */
+    @Test
+    void stateRoundTripsThroughSplitProtocol() {
+        GhostState state = state();
+        assertTrue(GhostState.combine(state.movement(), state.appearance()).equals(state));
     }
 
     /**

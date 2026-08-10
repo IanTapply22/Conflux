@@ -57,10 +57,14 @@ public final class ConfluxPaper extends JavaPlugin {
                                         context.getSource()
                                                 .getSender()
                                                 .sendRichMessage("<gold>Conflux</gold> node=<white>"
-                                                        + ghosts.nodeId() + "</white>, remote=<white>"
+                                                        + ghosts.nodeId() + "</white>, session=<white>"
+                                                        + ghosts.sessionId() + "</white>, realm=<white>"
+                                                        + ghosts.realmId() + "</white>, nodes=<white>"
+                                                        + ghosts.remoteNodes() + "</white>, remote=<white>"
                                                         + ghosts.remotePlayers()
                                                         + "</white>, rendered=<white>" + ghosts.renderedGhosts()
-                                                        + "</white>");
+                                                        + "</white>, metrics=<gray>" + ghosts.metricsSummary()
+                                                        + "</gray>");
                                         return Command.SINGLE_SUCCESS;
                                     })
                                     .build(),

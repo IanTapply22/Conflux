@@ -2,19 +2,17 @@ package com.iantapply.conflux.paper;
 
 import com.iantapply.conflux.api.GhostAnimation;
 import com.iantapply.conflux.api.GhostAnimationType;
+import com.iantapply.conflux.api.GhostAppearanceFrame;
 import com.iantapply.conflux.api.GhostFrame;
-import com.iantapply.conflux.api.GhostState;
-import com.iantapply.relay.api.Destination;
+import com.iantapply.conflux.api.GhostMovementFrame;
 import com.iantapply.relay.api.MessagingService;
 import com.iantapply.relay.api.Subscription;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -23,43 +21,51 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerAnimationEvent;
 import org.bukkit.event.player.PlayerAnimationType;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
-/** Coordinates state publication, remote frame selection, and client-side ghost rendering. */
+/** Orchestrates publication, remote state ingestion, and per-viewer ghost rendering. */
 final class GhostService implements Listener, AutoCloseable {
-    private static final int MAX_PLAYERS_PER_REMOTE_FRAME = 250;
+    /** Maximum messages retained before receive-side backpressure drops new arrivals. */
+    private static final int MAX_PENDING_MESSAGES = 512;
 
-    private final JavaPlugin plugin;
-    private final MessagingService relay;
+    /** Maximum received messages applied during one server tick. */
+    private static final int MAX_MESSAGES_PER_TICK = 128;
+
     private final GhostConfig config;
-    private final String nodeId;
-    private final AtomicLong frameSequence = new AtomicLong();
-    private final AtomicLong animationSequence = new AtomicLong();
-    private final Map<String, NodeFrame> remoteFrames = new HashMap<>();
-    private final Map<UUID, Map<GhostKey, PacketGhost>> rendered = new HashMap<>();
-    private final Map<UUID, Integer> viewerLimits = new HashMap<>();
-    private final Subscription frameSubscription;
-    private final Subscription animationSubscription;
+    private final ConfluxMetrics metrics = new ConfluxMetrics();
+    private final GhostPublisher publisher;
+    private final RemoteFrameStore remoteStore;
+    private final ViewerGhostRenderer renderer;
+    private final Map<UUID, Integer> viewerLimits = new java.util.HashMap<>();
+    private final ConcurrentLinkedQueue<Runnable> inbox = new ConcurrentLinkedQueue<>();
+    private final AtomicInteger inboxSize = new AtomicInteger();
+    private final List<Subscription> subscriptions = new ArrayList<>();
     private final BukkitTask publishTask;
     private final BukkitTask renderTask;
+    private long renderTicks;
 
     /**
-     * Starts the publication and rendering loops and subscribes to Relay topics.
+     * Starts publication, subscriptions, ingestion, and rendering.
      *
      * @param plugin owning Paper plugin
      * @param relay Relay messaging service
-     * @param config validated ghost settings
+     * @param config validated ghost configuration
      */
     GhostService(JavaPlugin plugin, MessagingService relay, GhostConfig config) {
-        this.plugin = plugin;
-        this.relay = relay;
         this.config = config;
-        this.nodeId = relay.status().node();
-        frameSubscription = relay.subscribe(RelayTopics.FRAME, message -> receive(message.payload()));
-        animationSubscription = relay.subscribe(RelayTopics.ANIMATION, message -> receive(message.payload()));
-        publishTask = Bukkit.getScheduler().runTaskTimer(plugin, this::publishFrame, 1L, config.publishPeriodTicks());
+        publisher = new GhostPublisher(plugin, relay, config, metrics);
+        remoteStore = new RemoteFrameStore(publisher.nodeId(), config);
+        renderer = new ViewerGhostRenderer(plugin, config, metrics);
+        subscriptions.add(relay.subscribe(RelayTopics.FRAME, message -> enqueue(message.payload())));
+        subscriptions.add(relay.subscribe(RelayTopics.MOVEMENT, message -> enqueue(message.payload())));
+        subscriptions.add(relay.subscribe(RelayTopics.APPEARANCE, message -> enqueue(message.payload())));
+        subscriptions.add(relay.subscribe(RelayTopics.ANIMATION, message -> enqueue(message.payload())));
+        publishTask =
+                Bukkit.getScheduler().runTaskTimer(plugin, publisher::publishTick, 1L, config.publishPeriodTicks());
         renderTask = Bukkit.getScheduler().runTaskTimer(plugin, this::renderTick, 1L, 1L);
     }
 
@@ -69,267 +75,243 @@ final class GhostService implements Listener, AutoCloseable {
      * @return local node identifier
      */
     String nodeId() {
-        return nodeId;
+        return publisher.nodeId();
     }
 
     /**
-     * Counts players present in the latest accepted remote frames.
+     * Returns the local process session identifier.
      *
-     * @return number of known remote players
+     * @return process session identifier
+     */
+    String sessionId() {
+        return publisher.sessionId().toString();
+    }
+
+    /**
+     * Returns the configured logical network realm.
+     *
+     * @return realm identifier
+     */
+    String realmId() {
+        return config.realmId();
+    }
+
+    /**
+     * Counts complete remote players in the state store.
+     *
+     * @return known remote player count
      */
     int remotePlayers() {
-        return remoteFrames.values().stream()
-                .mapToInt(frame -> frame.players().size())
-                .sum();
+        return remoteStore.playerCount();
     }
 
     /**
-     * Counts client-side ghost entities currently rendered to all viewers.
+     * Counts active remote nodes in the state store.
      *
-     * @return total number of rendered ghosts
+     * @return known remote node count
+     */
+    int remoteNodes() {
+        return remoteStore.nodeCount();
+    }
+
+    /**
+     * Counts currently rendered packet ghosts.
+     *
+     * @return rendered ghost count
      */
     int renderedGhosts() {
-        return rendered.values().stream().mapToInt(Map::size).sum();
+        return renderer.renderedGhosts();
     }
 
     /**
-     * Gets a player's configured ghost display limit.
+     * Returns compact operational counters for the status command.
+     *
+     * @return metrics summary
+     */
+    String metricsSummary() {
+        return metrics.summary();
+    }
+
+    /**
+     * Gets a viewer's active ghost limit.
      *
      * @param player local viewer
-     * @return viewer-specific limit, or the configured default
+     * @return viewer-specific or default limit
      */
     int viewerLimit(Player player) {
         return viewerLimits.getOrDefault(player.getUniqueId(), config.maximumPerViewer());
     }
 
     /**
-     * Sets and clamps a player's ghost display limit.
+     * Updates a viewer's clamped ghost limit and rebuilds their rendered set.
      *
      * @param player local viewer
-     * @param limit requested limit
+     * @param limit requested ghost limit
      */
     void setViewerLimit(Player player, int limit) {
         viewerLimits.put(player.getUniqueId(), Math.clamp(limit, 0, config.maximumPerViewer()));
+        renderer.destroyViewer(player.getUniqueId());
     }
 
     /**
-     * Publishes main-hand and off-hand swing animations.
+     * Publishes a monitored local hand-swing animation.
      *
-     * @param event monitored Paper animation event
+     * @param event player animation event
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onAnimation(PlayerAnimationEvent event) {
         GhostAnimationType type = event.getAnimationType() == PlayerAnimationType.OFF_ARM_SWING
                 ? GhostAnimationType.SWING_OFF_HAND
                 : GhostAnimationType.SWING_MAIN_HAND;
-        publishAnimation(event.getPlayer(), type);
+        publisher.publishAnimation(event.getPlayer(), type);
     }
 
     /**
-     * Publishes the hurt animation when a local player takes damage.
+     * Publishes a monitored local-player hurt animation.
      *
-     * @param event monitored damage event
+     * @param event entity damage event
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(EntityDamageEvent event) {
-        if (event.getEntity() instanceof Player player) publishAnimation(player, GhostAnimationType.HURT);
+        if (event.getEntity() instanceof Player player) publisher.publishAnimation(player, GhostAnimationType.HURT);
     }
 
     /**
-     * Removes per-viewer state when a local player disconnects.
+     * Removes viewer preferences and packet state after disconnect.
      *
-     * @param event player disconnect event
+     * @param event player quit event
      */
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        viewerLimits.remove(event.getPlayer().getUniqueId());
-        destroyViewer(event.getPlayer().getUniqueId());
+        UUID viewerId = event.getPlayer().getUniqueId();
+        viewerLimits.remove(viewerId);
+        renderer.destroyViewer(viewerId);
     }
 
-    /** Cancels tasks, closes subscriptions, and destroys all rendered ghosts. */
+    /**
+     * Rebuilds client-only entities after the client processes a respawn packet.
+     *
+     * @param event player respawn event
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRespawn(PlayerRespawnEvent event) {
+        renderer.destroyViewer(event.getPlayer().getUniqueId());
+    }
+
+    /**
+     * Rebuilds client-only entities after a viewer changes dimensions or worlds.
+     *
+     * @param event player world-change event
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onWorldChanged(PlayerChangedWorldEvent event) {
+        renderer.destroyViewer(event.getPlayer().getUniqueId());
+    }
+
+    /** Cancels tasks, closes subscriptions, clears queued work, and destroys rendered ghosts. */
     @Override
     public void close() {
         publishTask.cancel();
         renderTask.cancel();
-        relay.publish(
-                RelayTopics.FRAME,
-                Destination.paperServers(),
-                new GhostFrame(nodeId, frameSequence.incrementAndGet(), System.currentTimeMillis(), List.of()));
-        frameSubscription.close();
-        animationSubscription.close();
-        rendered.keySet().stream().toList().forEach(this::destroyViewer);
-        remoteFrames.clear();
-    }
-
-    /** Captures and publishes a complete frame for the local node. */
-    private void publishFrame() {
-        List<GhostState> players = Bukkit.getOnlinePlayers().stream()
-                .map(player -> GhostStateFactory.capture(player, config.showEquipment()))
-                .toList();
-        relay.publish(
-                RelayTopics.FRAME,
-                Destination.paperServers(),
-                new GhostFrame(nodeId, frameSequence.incrementAndGet(), System.currentTimeMillis(), players));
+        publisher.publishShutdown();
+        subscriptions.forEach(Subscription::close);
+        subscriptions.clear();
+        inbox.clear();
+        inboxSize.set(0);
+        renderer.destroyAll();
+        remoteStore.clear();
     }
 
     /**
-     * Publishes a transient animation for a local player.
+     * Queues a received full recovery frame for main-thread application.
      *
-     * @param player player that produced the animation
-     * @param type animation to publish
+     * @param frame received full frame
      */
-    private void publishAnimation(Player player, GhostAnimationType type) {
-        relay.publish(
-                RelayTopics.ANIMATION,
-                Destination.paperServers(),
-                new GhostAnimation(
-                        nodeId,
-                        player.getUniqueId(),
-                        type,
-                        animationSequence.incrementAndGet(),
-                        System.currentTimeMillis()));
+    private void enqueue(GhostFrame frame) {
+        enqueue(() -> record(remoteStore.accept(frame)));
     }
 
     /**
-     * Accepts a newer bounded frame from a remote node on the server thread.
+     * Queues a received movement frame for main-thread application.
      *
-     * @param frame received node frame
+     * @param frame received movement frame
      */
-    private void receive(GhostFrame frame) {
-        if (frame.nodeId().equals(nodeId) || frame.players().size() > MAX_PLAYERS_PER_REMOTE_FRAME) return;
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            NodeFrame previous = remoteFrames.get(frame.nodeId());
-            if (previous == null || frame.sequence() > previous.sequence()) {
-                remoteFrames.put(
-                        frame.nodeId(), new NodeFrame(frame.sequence(), System.currentTimeMillis(), frame.players()));
-            }
-        });
+    private void enqueue(GhostMovementFrame frame) {
+        enqueue(() -> record(remoteStore.accept(frame)));
     }
 
     /**
-     * Dispatches a remote animation to each viewer rendering the corresponding ghost.
+     * Queues a received appearance frame for main-thread application.
+     *
+     * @param frame received appearance frame
+     */
+    private void enqueue(GhostAppearanceFrame frame) {
+        enqueue(() -> record(remoteStore.accept(frame)));
+    }
+
+    /**
+     * Queues a received transient animation for validation and rendering.
      *
      * @param animation received animation
      */
-    private void receive(GhostAnimation animation) {
-        if (animation.nodeId().equals(nodeId)) return;
-        Bukkit.getScheduler().runTask(plugin, () -> rendered.values().forEach(ghosts -> {
-            PacketGhost ghost = ghosts.get(new GhostKey(animation.nodeId(), animation.playerId()));
-            if (ghost != null) ghost.animate(animation.type());
-        }));
-    }
-
-    /** Expires stale nodes and reconciles the ghosts visible to every online viewer. */
-    private void renderTick() {
-        long now = System.currentTimeMillis();
-        remoteFrames
-                .entrySet()
-                .removeIf(entry -> now - entry.getValue().receivedAt() > config.staleAfterMilliseconds());
-        for (Player viewer : Bukkit.getOnlinePlayers()) reconcile(viewer);
-        rendered.keySet().removeIf(viewerId -> Bukkit.getPlayer(viewerId) == null);
+    private void enqueue(GhostAnimation animation) {
+        enqueue(() -> {
+            boolean accepted = remoteStore.accept(animation);
+            record(accepted);
+            if (accepted) renderer.animate(animation);
+        });
     }
 
     /**
-     * Selects the nearest eligible remote players and updates one viewer's packet ghosts.
+     * Adds bounded work to the cross-thread receive inbox.
      *
-     * @param viewer local player receiving ghost packets
+     * @param operation main-thread store or rendering operation
      */
-    private void reconcile(Player viewer) {
-        int limit = viewerLimit(viewer);
-        double radiusSquared = config.viewRadiusBlocks() * config.viewRadiusBlocks();
-        Map<UUID, Candidate> newestByPlayer = new HashMap<>();
-        for (Map.Entry<String, NodeFrame> node : remoteFrames.entrySet()) {
-            for (GhostState state : node.getValue().players()) {
-                if (state.playerId().equals(viewer.getUniqueId())) continue;
-                if (!state.world().equals(viewer.getWorld().getName())) continue;
-                double distanceSquared = distanceSquared(viewer, state);
-                if (distanceSquared > radiusSquared) continue;
-                Candidate candidate = new Candidate(
-                        new GhostKey(node.getKey(), state.playerId()),
-                        node.getValue().sequence(),
-                        node.getValue().receivedAt(),
-                        distanceSquared,
-                        state);
-                newestByPlayer.merge(
-                        state.playerId(),
-                        candidate,
-                        (first, second) -> first.receivedAt() >= second.receivedAt() ? first : second);
+    private void enqueue(Runnable operation) {
+        int size = inboxSize.incrementAndGet();
+        if (size > MAX_PENDING_MESSAGES) {
+            inboxSize.decrementAndGet();
+            metrics.dropped();
+            return;
+        }
+        inbox.add(operation);
+    }
+
+    /** Drains received work, expires nodes, reconciles viewers, and advances interpolation. */
+    private void renderTick() {
+        drainInbox();
+        remoteStore.expireStale();
+        renderTicks++;
+        if (renderTicks % config.selectionPeriodTicks() == 0) {
+            for (Player viewer : Bukkit.getOnlinePlayers()) {
+                renderer.reconcile(
+                        viewer,
+                        remoteStore.playersNear(
+                                viewer.getWorld().getName(), viewer.getX(), viewer.getZ(), config.viewRadiusBlocks()),
+                        remoteStore.revision(),
+                        viewerLimit(viewer));
             }
         }
-        List<Candidate> selected = newestByPlayer.values().stream()
-                .sorted(Comparator.comparingDouble(Candidate::distanceSquared))
-                .limit(limit)
-                .toList();
-        Map<GhostKey, Candidate> desired = new LinkedHashMap<>();
-        selected.forEach(candidate -> desired.put(candidate.key(), candidate));
+        renderer.tick();
+    }
 
-        Map<GhostKey, PacketGhost> ghosts = rendered.computeIfAbsent(viewer.getUniqueId(), ignored -> new HashMap<>());
-        List<GhostKey> removed = new ArrayList<>();
-        ghosts.forEach((key, ghost) -> {
-            if (!desired.containsKey(key)) {
-                ghost.destroy();
-                removed.add(key);
-            }
-        });
-        removed.forEach(ghosts::remove);
-
-        desired.forEach((key, candidate) -> {
-            PacketGhost ghost = ghosts.get(key);
-            if (ghost != null && !ghost.sameIdentity(candidate.state())) {
-                ghost.destroy();
-                ghosts.remove(key);
-                ghost = null;
-            }
-            if (ghost == null) {
-                ghost = new PacketGhost(plugin, viewer, candidate.state());
-                ghosts.put(key, ghost);
-            }
-            ghost.target(candidate.state(), candidate.sequence());
-            ghost.tick();
-        });
+    /** Applies a bounded number of received messages on the server thread. */
+    private void drainInbox() {
+        for (int processed = 0; processed < MAX_MESSAGES_PER_TICK; processed++) {
+            Runnable operation = inbox.poll();
+            if (operation == null) return;
+            inboxSize.decrementAndGet();
+            operation.run();
+        }
     }
 
     /**
-     * Destroys every packet ghost belonging to a viewer.
+     * Records whether a received message was accepted by protocol validation.
      *
-     * @param viewerId unique identifier of the viewer
+     * @param accepted whether the message was accepted
      */
-    private void destroyViewer(UUID viewerId) {
-        Map<GhostKey, PacketGhost> ghosts = rendered.remove(viewerId);
-        if (ghosts != null) ghosts.values().forEach(PacketGhost::destroy);
+    private void record(boolean accepted) {
+        metrics.received();
+        if (!accepted) metrics.dropped();
     }
-
-    /**
-     * Calculates squared three-dimensional distance without allocating a location.
-     *
-     * @param viewer local viewer
-     * @param state remote player state
-     * @return squared distance between the viewer and remote state
-     */
-    private static double distanceSquared(Player viewer, GhostState state) {
-        double dx = viewer.getX() - state.x();
-        double dy = viewer.getY() - state.y();
-        double dz = viewer.getZ() - state.z();
-        return dx * dx + dy * dy + dz * dz;
-    }
-
-    /**
-     * Latest accepted snapshot from a remote node.
-     *
-     * @param sequence source frame sequence
-     * @param receivedAt local receipt time in Unix epoch milliseconds
-     * @param players remote player states in the frame
-     */
-    private record NodeFrame(long sequence, long receivedAt, List<GhostState> players) {}
-
-    /**
-     * Eligible remote player considered during per-viewer selection.
-     *
-     * @param key node-qualified player key
-     * @param sequence source frame sequence
-     * @param receivedAt local frame receipt time
-     * @param distanceSquared squared distance from the viewer
-     * @param state remote visual state
-     */
-    private record Candidate(GhostKey key, long sequence, long receivedAt, double distanceSquared, GhostState state) {}
 }

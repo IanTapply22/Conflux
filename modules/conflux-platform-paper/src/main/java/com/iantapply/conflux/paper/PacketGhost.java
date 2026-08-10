@@ -40,11 +40,12 @@ import org.bukkit.plugin.Plugin;
 
 /** A client-only player entity that is never inserted into the local world's entity list. */
 final class PacketGhost {
-    private static final int INTERPOLATION_TICKS = 2;
-
     private final Plugin plugin;
     private final Player viewer;
     private final ServerPlayer entity;
+    private final int interpolationTicks;
+    private final double teleportThresholdSquared;
+    private final int tabListRemovalDelayTicks;
     private GhostState identity;
     private GhostEquipment equipment;
     private long targetSequence = -1;
@@ -57,7 +58,7 @@ final class PacketGhost {
     private double targetX;
     private double targetY;
     private double targetZ;
-    private int interpolationTick = INTERPOLATION_TICKS;
+    private int interpolationTick;
     private boolean active = true;
 
     /**
@@ -66,12 +67,17 @@ final class PacketGhost {
      * @param plugin plugin used to schedule delayed packets
      * @param viewer local player receiving the ghost packets
      * @param state initial remote player state
+     * @param config rendering and interpolation settings
      */
-    PacketGhost(Plugin plugin, Player viewer, GhostState state) {
+    PacketGhost(Plugin plugin, Player viewer, GhostState state, GhostConfig config) {
         this.plugin = plugin;
         this.viewer = viewer;
         this.identity = state;
         this.equipment = state.equipment();
+        this.interpolationTicks = config.interpolationTicks();
+        this.teleportThresholdSquared = config.teleportThresholdBlocks() * config.teleportThresholdBlocks();
+        this.tabListRemovalDelayTicks = config.tabListRemovalDelayTicks();
+        this.interpolationTick = interpolationTicks;
         GameProfile profile = new GameProfile(state.playerId(), state.username());
         if (!state.skinValue().isEmpty()) {
             Property property = state.skinSignature().isEmpty()
@@ -119,7 +125,10 @@ final class PacketGhost {
             targetX = state.x();
             targetY = state.y();
             targetZ = state.z();
-            interpolationTick = 0;
+            double dx = state.x() - x;
+            double dy = state.y() - y;
+            double dz = state.z() - z;
+            interpolationTick = dx * dx + dy * dy + dz * dz > teleportThresholdSquared ? interpolationTicks - 1 : 0;
             applyState(state, false);
             if (!equipment.equals(state.equipment())) {
                 equipment = state.equipment();
@@ -130,9 +139,9 @@ final class PacketGhost {
 
     /** Advances position interpolation by one server tick and sends movement packets. */
     void tick() {
-        if (interpolationTick >= INTERPOLATION_TICKS) return;
+        if (interpolationTick >= interpolationTicks) return;
         interpolationTick++;
-        double progress = interpolationTick / (double) INTERPOLATION_TICKS;
+        double progress = interpolationTick / (double) interpolationTicks;
         x = lerp(startX, targetX, progress);
         y = lerp(startY, targetY, progress);
         z = lerp(startZ, targetZ, progress);
@@ -196,7 +205,7 @@ final class PacketGhost {
                         () -> {
                             if (active) send(new ClientboundPlayerInfoRemovePacket(List.of(entity.getUUID())));
                         },
-                        20L);
+                        tabListRemovalDelayTicks);
     }
 
     /**
