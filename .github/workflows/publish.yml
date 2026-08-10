@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: write
-  packages: write
+  packages: read
   id-token: write
   attestations: write
 
@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   release:
-    name: Verify, publish packages and release plugin
+    name: Verify and release plugin
     runs-on: ubuntu-latest
     timeout-minutes: 40
     environment: jdk25-publishing
@@ -35,7 +35,7 @@ jobs:
             echo "Expected a semantic version tag such as v1.2.3; got $GITHUB_REF_NAME" >&2
             exit 1
           fi
-          echo "RELAY_VERSION=$version" >> "$GITHUB_ENV"
+          echo "CONFLUX_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Set up JDK 25
         uses: actions/setup-java@v5
@@ -46,32 +46,29 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Verify, build, create SBOM and publish packages
-        run: ./gradlew clean check javadoc jar cyclonedxBom publish --no-daemon --no-configuration-cache
+      - name: Verify, build and create SBOM
+        run: ./gradlew clean check javadoc jar cyclonedxBom --no-daemon --no-configuration-cache
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
 
       - name: Create SHA-256 checksum
         shell: bash
         run: |
-          artifact="build/libs/Relay-${RELAY_VERSION}.jar"
+          artifact="build/libs/Conflux-${CONFLUX_VERSION}.jar"
           sha256sum "$artifact" > "$artifact.sha256"
 
       - name: Attest plugin artifact
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: build/libs/Relay-${{ env.RELAY_VERSION }}.jar
+          subject-path: build/libs/Conflux-${{ env.CONFLUX_VERSION }}.jar
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          artifact="build/libs/Relay-${RELAY_VERSION}.jar"
+          artifact="build/libs/Conflux-${CONFLUX_VERSION}.jar"
           gh release create "$GITHUB_REF_NAME" \
             "$artifact" \
             "$artifact.sha256" \
@@ -79,4 +76,4 @@ jobs:
             build/reports/cyclonedx/bom.xml \
             --verify-tag \
             --generate-notes \
-            --title "Relay ${RELAY_VERSION}"
+            --title "Conflux ${CONFLUX_VERSION}"

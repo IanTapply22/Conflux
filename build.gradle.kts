@@ -6,12 +6,18 @@ plugins {
     base
     id("com.diffplug.spotless") version "8.9.0"
     id("io.papermc.paperweight.userdev") version "2.0.0-beta.21" apply false
+    id("org.cyclonedx.bom") version "3.4.0"
     id("xyz.jpenilla.run-paper") version "3.1.0" apply false
 }
 
 allprojects {
     group = providers.gradleProperty("group").get()
-    version = providers.gradleProperty("version").get()
+    version =
+        providers
+            .environmentVariable("CONFLUX_VERSION")
+            .orElse(providers.gradleProperty("version"))
+            .map { it.removePrefix("v") }
+            .get()
     description = providers.gradleProperty("description").get()
     repositories {
         mavenLocal()
