@@ -107,3 +107,13 @@ tasks.register<Javadoc>("aggregateJavadoc") {
             .get()
             .asFile
 }
+
+tasks.register<Exec>("installGitHooks") {
+    group = "build setup"
+    description = "Configures this Git checkout to use the tracked hooks in .githooks."
+    if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+        commandLine("git", "config", "core.hooksPath", ".githooks")
+    } else {
+        commandLine("sh", "-c", "chmod +x .githooks/pre-commit && git config core.hooksPath .githooks")
+    }
+}
