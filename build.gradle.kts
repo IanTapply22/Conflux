@@ -8,8 +8,8 @@ import org.gradle.plugins.signing.SigningExtension
 plugins {
     base
     id("com.diffplug.spotless") version "8.9.0"
-    id("io.papermc.paperweight.userdev") version "2.0.0-beta.21" apply false
-    id("org.cyclonedx.bom") version "3.4.0"
+    id("io.papermc.paperweight.userdev") version "2.0.0-SNAPSHOT" apply false
+    id("org.cyclonedx.bom") version "3.4.1"
     id("xyz.jpenilla.run-paper") version "3.1.0" apply false
 }
 
@@ -45,7 +45,7 @@ subprojects {
         withJavadocJar()
     }
     dependencies {
-        "testImplementation"(platform("org.junit:junit-bom:6.1.2"))
+        "testImplementation"(platform("org.junit:junit-bom:6.1.3"))
         "testImplementation"("org.junit.jupiter:junit-jupiter")
         "testRuntimeOnly"("org.junit.platform:junit-platform-launcher")
     }
